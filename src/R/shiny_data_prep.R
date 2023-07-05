@@ -1,3 +1,5 @@
+# prepare data for shiny app
+
 library(tidyverse)
 
 json_file <- here::here("data", "raw", "yelp_academic_dataset_business.json")
