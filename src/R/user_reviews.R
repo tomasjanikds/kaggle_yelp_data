@@ -8,14 +8,11 @@ library(recipes)
 library(tidygraph)
 library(ggraph)
 
-## read-in user data
+# 1.0 READ-IN DATA ----
 json_file <- "data/raw/yelp_academic_dataset_user.json"
 user_raw <- jsonlite::stream_in(textConnection(readLines(json_file)), 
                                 flatten = TRUE) %>%
   as_tibble()
-
-user_raw %>%
-  glimpse()
 
 # 2.0 CLEANSING ----
 plot_missing(user_raw)
@@ -28,10 +25,13 @@ user_full_tbl <- user_raw %>%
          friends_cnt = map_int(friends, ~ length(.x))) %>%
   select(-c(name, elite, friends))
 
-saveRDS(user_full_tbl, here::here("data", "processed", "user_cleansed.rds"))
+# save full cleansed dataset if needed
+# saveRDS(user_full_tbl, here::here("data", "processed", "user_cleansed.rds"))
 
-user_full_tbl <- readRDS(here::here("data", "processed", "user_cleansed.rds"))
+# if for some reason your session creashes, re-create the dataset
+# user_full_tbl <- readRDS(here::here("data", "processed", "user_cleansed.rds"))
 
+# Take only sample customers
 set.seed(1234)
 user_tbl <- user_full_tbl %>%
   sample_n(size = 2000)
@@ -45,11 +45,10 @@ rec_obj <- recipe(~ ., data = user_tbl) %>%
 
 train_tbl <- bake(rec_obj, new_data = user_tbl)
 
-train_tbl %>% glimpse()
-
+# save sample preprocessed dataset if needed
 # saveRDS(train_tbl, here::here("data", "processed", "train_tbl.rds"))
 
-# 5.0 ADJACENCY MATRIX ----
+# 4.0 ADJACENCY MATRIX ----
 # - User-Item Table
 
 customer_correlation_matrix <- train_tbl %>%
@@ -63,53 +62,47 @@ customer_correlation_matrix <- train_tbl %>%
   as.matrix() %>%
   cor() 
 
-# customer_correlation_matrix %>% class()
-
+# Feel free to inspect the user-item table
 # customer_correlation_matrix %>% 
 #   as_tibble(rownames = "user_id")
 
-# 6.0 PRUNING THE ADJACENCY MATRIX ----
+# 5.0 PRUNING THE ADJACENCY MATRIX ----
 
-# 6.1 Remove customer relationships to themselves
+# Remove:
+# 1. customer relationships to themselves
+# 2. duplicate relationships
 diag(customer_correlation_matrix) <- 0
-
-# 6.2 Remove duplicate relationships 
 customer_correlation_matrix[upper.tri(customer_correlation_matrix)] <- 0
 
-# 6.3 Prune relationships
+# Prune relationships
 edge_limit <- 0.99
 customer_correlation_matrix[customer_correlation_matrix < edge_limit] <- 0
 
 sum(customer_correlation_matrix > 0)
 
 
-# 6.4 Filter relationships to subset of customers that have relationships
+# Filter relationships to subset of customers that have relationships
 customer_correlation_matrix <- customer_correlation_matrix[rowSums(customer_correlation_matrix) > 0, colSums(customer_correlation_matrix) > 0] 
 customer_correlation_matrix %>% dim()
 
 customer_correlation_matrix %>% as_tibble(rownames = "user_id")
 
-
-# 6.5 Convert to Long Tibble with From & To Column Relating Customers
+# Convert to Long Tibble with From & To Column Relating Customers
 customer_relationship_tbl <- customer_correlation_matrix %>%
   as_tibble(rownames = "from") %>%
   gather(key = "to", value = "weight", -from) %>%
   filter(weight > 0)
 
+# inspect the object
 customer_relationship_tbl
 
-# 7.0 WORKFLOW - Convert to Function for Dynamic Filtering of Edge Limit ----
+# 6.0 WORKFLOW - Convert to Function for Dynamic Filtering of Edge Limit ----
 
 prep_corr_matrix_for_tbl_graph <- function(correlation_matrix, edge_limit = 0.9999) {
-  
   diag(correlation_matrix) <- 0
-  
   correlation_matrix[upper.tri(correlation_matrix)] <- 0
-  
   correlation_matrix[correlation_matrix < edge_limit] <- 0
-  
   correlation_matrix <- correlation_matrix[rowSums(correlation_matrix) > 0, colSums(correlation_matrix) > 0] 
-  
   correlation_matrix %>%
     as_tibble(rownames = "from") %>%
     gather(key = "to", value = "weight", -from) %>%
@@ -117,22 +110,7 @@ prep_corr_matrix_for_tbl_graph <- function(correlation_matrix, edge_limit = 0.99
   
 }
 
-prep_corr_matrix_for_tbl_graph(customer_correlation_matrix, edge_limit = 0.9999)
-
-# 7.0 NETWORK VISUALIZATION ----
-
-customer_correlation_matrix %>%
-  
-  prep_corr_matrix_for_tbl_graph(edge_limit = 0.99) %>%
-  
-  as_tbl_graph(directed = FALSE) %>%
-  
-  ggraph(layout = "kk") +
-  geom_edge_link(alpha = 0.5, color = palette_light()["blue"]) +
-  geom_node_point(alpha = 0.5, color = palette_light()["blue"]) +
-  theme_graph(background = "white")
-
-# 8.0 TBL GRAPH MANIPULATION ----
+# 7.0 TBL GRAPH MANIPULATION ----
 
 customer_tbl_graph <- customer_correlation_matrix %>%
   prep_corr_matrix_for_tbl_graph(edge_limit = 0.99) %>%
