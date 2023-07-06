@@ -18,7 +18,7 @@ This repository contains the necessary files and code for a most influential cus
 
   2. `functions.R`: This is a helper script with functions used in the solution.
 
-  3. `kaggle_data.R`: This script downloads the raw data from kaggle.
+  3. `kaggle_data.R`: This script contains instructions on how to download and read-in the raw data from kaggle.
  
   4. `shiny_data_prep.R`: This script runs data prep steps for Shiny application.
 
