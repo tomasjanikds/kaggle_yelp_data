@@ -2,3 +2,5 @@
 .Rproj.user
 .Rprofile
 .DS_Store
+/man/user_reviews_cache/*
+/man/user_reviews_files/*
