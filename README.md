@@ -73,3 +73,6 @@ If you are not using RStudio:
 
 By following these steps, you should be able to replicate the environment for the machine learning solution, regardless of whether you are using RStudio or not.
 
+## Shiny application
+
+For the geo-spatial analysis, please see my app here: [Late Coffee](http://tjanik.shinyapps.io/late_coffee/)
