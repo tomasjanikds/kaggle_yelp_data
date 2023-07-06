@@ -7,16 +7,24 @@ library(correlationfunnel)
 library(recipes)
 library(tidygraph)
 library(ggraph)
+library(h2o)
+library(lime)
 
 # 1.0 READ-IN DATA ----
-json_file <- "data/raw/yelp_academic_dataset_user.json"
+json_file <- here::here("data", "raw", "yelp_academic_dataset_user.json")
 user_raw <- jsonlite::stream_in(textConnection(readLines(json_file)), 
                                 flatten = TRUE) %>%
   as_tibble()
 
 # 2.0 CLEANSING ----
+# No missing values
 plot_missing(user_raw)
 
+# Tasks:
+# 1. convert date feature
+# 2. create two new features: counts of elite statuses and friends
+
+# << RUN >> this will take 10 mins to run
 user_full_tbl <- user_raw %>%
   mutate(yelping_since = lubridate::year(ymd_hms(yelping_since)),
          elite = strsplit(elite, ","),
@@ -50,7 +58,6 @@ train_tbl <- bake(rec_obj, new_data = user_tbl)
 
 # 4.0 ADJACENCY MATRIX ----
 # - User-Item Table
-
 customer_correlation_matrix <- train_tbl %>%
   
   # Transpose data for customer similarity
@@ -68,9 +75,9 @@ customer_correlation_matrix <- train_tbl %>%
 
 # 5.0 PRUNING THE ADJACENCY MATRIX ----
 
-# Remove:
-# 1. customer relationships to themselves
-# 2. duplicate relationships
+# Tasks:
+# 1. Remove customer relationships to themselves
+# 2. Remove duplicate relationships
 diag(customer_correlation_matrix) <- 0
 customer_correlation_matrix[upper.tri(customer_correlation_matrix)] <- 0
 
@@ -78,16 +85,17 @@ customer_correlation_matrix[upper.tri(customer_correlation_matrix)] <- 0
 edge_limit <- 0.99
 customer_correlation_matrix[customer_correlation_matrix < edge_limit] <- 0
 
-sum(customer_correlation_matrix > 0)
-
+# sum(customer_correlation_matrix > 0)
 
 # Filter relationships to subset of customers that have relationships
 customer_correlation_matrix <- customer_correlation_matrix[rowSums(customer_correlation_matrix) > 0, colSums(customer_correlation_matrix) > 0] 
+
+# number of customers with strong relationship
 customer_correlation_matrix %>% dim()
 
 customer_correlation_matrix %>% as_tibble(rownames = "user_id")
 
-# Convert to Long Tibble with From & To Column Relating Customers
+# Convert to Long tibble with From & To column relating customers
 customer_relationship_tbl <- customer_correlation_matrix %>%
   as_tibble(rownames = "from") %>%
   gather(key = "to", value = "weight", -from) %>%
@@ -96,7 +104,7 @@ customer_relationship_tbl <- customer_correlation_matrix %>%
 # inspect the object
 customer_relationship_tbl
 
-# 6.0 WORKFLOW - Convert to Function for Dynamic Filtering of Edge Limit ----
+# 6.0 WORKFLOW - Create a function for dynamic filtering of edge Limit ----
 
 prep_corr_matrix_for_tbl_graph <- function(correlation_matrix, edge_limit = 0.9999) {
   diag(correlation_matrix) <- 0
@@ -110,7 +118,7 @@ prep_corr_matrix_for_tbl_graph <- function(correlation_matrix, edge_limit = 0.99
   
 }
 
-# 7.0 TBL GRAPH MANIPULATION ----
+# 7.0 GRAPH MANIPULATION ----
 
 customer_tbl_graph <- customer_correlation_matrix %>%
   prep_corr_matrix_for_tbl_graph(edge_limit = 0.99) %>%
@@ -118,23 +126,7 @@ customer_tbl_graph <- customer_correlation_matrix %>%
 
 customer_tbl_graph
 
-# 8.1 Ranking Nodes - Rank by topological traits ----
-customer_tbl_graph %>%
-  activate(nodes) %>%
-  
-  mutate(node_rank = node_rank_traveller()) %>%
-  arrange(node_rank)
-
-
-# 8.2 Centrality - Number of edges going in/out of node ----
-customer_tbl_graph %>%
-  activate(nodes) %>%
-  
-  mutate(neighbors = centrality_degree()) %>%
-  arrange(desc(neighbors))
-
-
-# 8.3 Grouping Nodes (Clustering) ----
+# 7.1 Grouping Nodes (Clustering) ----
 grouped_tbl_graph <- customer_tbl_graph %>%
   activate(nodes) %>%
   mutate(neighbors = centrality_degree()) %>%
@@ -144,7 +136,8 @@ grouped_tbl_graph <- customer_tbl_graph %>%
   arrange(desc(neighbors)) %>%
   mutate(group_lump = group %>% as_factor() %>% fct_lump(n = 5))
 
-
+# Network of customers with relationships in 5 clusters
+# << RUN >> this will run 10 mins
 grouped_tbl_graph %>%
   ggraph(layout = "kk") +
   geom_edge_link(alpha = 0.5) +
@@ -155,7 +148,8 @@ grouped_tbl_graph %>%
   theme(legend.position = "bottom") +
   labs(title = "Customer Network Detection")
 
-# 9.0 MOST INFLUENTIAL CUSTOMERS ----
+# 8.0 MOST INFLUENTIAL CUSTOMERS ----
+# This is the most valuable information for sales/marketing departments
 influential_customers_tbl <- grouped_tbl_graph %>%
   activate(nodes) %>%
   as_tibble() %>%
@@ -163,14 +157,17 @@ influential_customers_tbl <- grouped_tbl_graph %>%
   filter(neighbors %in% max(neighbors)) %>%
   ungroup()
 
+# Based on these customers the company can draft special offer
+# and they (customers) will spread it amongst the cluster
 influential_customers_tbl
 
+# Inspect the features of the most influential customers
 influential_customers_tbl %>%
   left_join(user_tbl, by = c("name" = "user_id")) %>%
   glimpse()
 
-# 10.0 COMMUNITY ANALYSIS ----
-# - Join Communities and Inspect Key Features
+# 9.0 COMMUNITY ANALYSIS ----
+# - join communities and inspect key features
 
 user_group_tbl <- user_tbl %>%
   left_join(as_tibble(grouped_tbl_graph), by = c("user_id" = "name")) %>%
@@ -198,7 +195,7 @@ plot_density_by <- function(data, col, group_focus = 1, ncol = 1) {
     theme_tq()
 }
 
-# 10.1 Dissimilarities -----
+# 10.0 DISSIMILARITIES -----
 
 user_group_tbl %>% plot_density_by(review_count, group_focus = 1)
 user_group_tbl %>% plot_density_by(log(review_count), group_focus = 1)
@@ -209,10 +206,8 @@ user_group_tbl %>% plot_density_by(log(funny), group_focus = 1)
 user_group_tbl %>% plot_density_by(average_stars, group_focus = 4)
 user_group_tbl %>% plot_density_by(average_stars, group_focus = 5)
 
-library(h2o)
-library(lime)
-
-# H2O MODEL TRAINING -----
+# 11.0 Machine Learning model to predict the group association ----
+# H2O model training
 
 h2o.init()
 
