@@ -1,3 +1,21 @@
+################################################################################
+#                                                                              #
+#                         Download and Read Kaggle Dataset                     #
+#                                                                              #
+################################################################################
+
+# Script Description:
+# ------------------
+# This script provides instructions on how to download and read a Kaggle dataset
+# into R for further analysis. It outlines the necessary steps and code snippets
+# to accomplish the task.
+
+# Kaggle Account and API Setup
+# ------------------------------------
+# Before downloading the dataset, make sure you have a Kaggle account and have
+# set up the Kaggle API. Follow the Kaggle documentation for instructions on
+# creating an account and generating an API key.
+
 ## install kaggler package from github
 # devtools::install_github("ldurazo/kaggler")
 
@@ -6,7 +24,8 @@ library(readr)
 library(kaggler)
 
 # Download data ----
-# Should you wich to download datasets, uncomment following lines
+# << RUN >> this might take up to 30 mins
+# Should you wish to download datasets, uncomment following lines
 # kgl_auth(creds_file = 'kaggle.json')
 # 
 # response <- kgl_datasets_download_all(owner_dataset = "yelp-dataset/yelp-dataset")
@@ -38,16 +57,3 @@ json_file <- "data/yelp_academic_dataset_user.json"
 user_tbl <- jsonlite::stream_in(textConnection(readLines(json_file, n=1000)), 
                                 flatten = TRUE) %>%
   as_tibble()
-
-# features
-map(list(business_tbl, review_tbl, checkin_tbl, tip_tbl, user_tbl),
-    ~ glimpse(.x))
-
-
-## O2 assignmnent
-json_file <- "data/yelp_academic_dataset_user.json"
-user_tbl <- jsonlite::stream_in(textConnection(readLines(json_file)), 
-                                flatten = TRUE) %>%
-  as_tibble()
-
-
