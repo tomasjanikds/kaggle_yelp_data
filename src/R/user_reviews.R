@@ -1,18 +1,27 @@
 # LIBRARIES ----
+
+# Data manipulation
 library(tidyverse)
 library(lubridate)
 library(tidyquant)
+
+# EDA
 library(DataExplorer)
-library(correlationfunnel)
+
+# ML
 library(recipes)
-library(tidygraph)
-library(ggraph)
 library(h2o)
 library(lime)
 
+# Graph
+library(tidygraph)
+library(ggraph)
+
+# load helper functions
 source(here::here("src", "R", "functions.R"))
 
 # 1.0 READ-IN DATA ----
+# << RUN >> this will take 10 mins to run
 json_file <- here::here("data", "raw", "yelp_academic_dataset_user.json")
 user_raw <- jsonlite::stream_in(textConnection(readLines(json_file)), 
                                 flatten = TRUE) %>%
@@ -38,7 +47,7 @@ user_full_tbl <- user_raw %>%
 # save full cleansed dataset if needed
 # saveRDS(user_full_tbl, here::here("data", "processed", "user_cleansed.rds"))
 
-# if for some reason your session creashes, re-create the dataset
+# if for some reason your session crashes, re-create the dataset
 # user_full_tbl <- readRDS(here::here("data", "processed", "user_cleansed.rds"))
 
 # Take only sample customers
@@ -97,7 +106,7 @@ customer_correlation_matrix %>% dim()
 
 customer_correlation_matrix %>% as_tibble(rownames = "user_id")
 
-# Convert to Long tibble with From & To column relating customers
+# Convert to long tibble with From & To column relating customers
 customer_relationship_tbl <- customer_correlation_matrix %>%
   as_tibble(rownames = "from") %>%
   gather(key = "to", value = "weight", -from) %>%
@@ -106,7 +115,7 @@ customer_relationship_tbl <- customer_correlation_matrix %>%
 # inspect the object
 customer_relationship_tbl
 
-# 6.0 GRAPH MANIPULATION ----
+# 6.0 TBL GRAPH MANIPULATION ----
 
 customer_tbl_graph <- customer_correlation_matrix %>%
   prep_corr_matrix_for_tbl_graph(edge_limit = 0.99) %>%
@@ -124,7 +133,7 @@ grouped_tbl_graph <- customer_tbl_graph %>%
   arrange(desc(neighbors)) %>%
   mutate(group_lump = group %>% as_factor() %>% fct_lump(n = 5))
 
-# Network of customers with relationships in 5 clusters
+# Network of customers with relationships in 6 clusters
 # << RUN >> this will run 10 mins
 grouped_tbl_graph %>%
   ggraph(layout = "kk") +
@@ -146,7 +155,7 @@ influential_customers_tbl <- grouped_tbl_graph %>%
   ungroup()
 
 # Based on these customers the company can draft special offer
-# and they (customers) will spread it amongst the cluster
+# and they (customers) will spread it among the cluster
 influential_customers_tbl
 
 # Inspect the features of the most influential customers

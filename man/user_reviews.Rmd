@@ -1,0 +1,336 @@
+---
+title: "Most influential customers"
+author: "Tomas Janik"
+date: "2023/07/06"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = FALSE,
+                      eval = TRUE)
+```
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(tidyquant)
+library(DataExplorer)
+library(recipes)
+library(tidygraph)
+library(ggraph)
+library(h2o)
+library(lime)
+library(gt)
+source(here::here("src", "R", "functions.R"))
+```
+
+# Introduction
+
+In this document, we aim to address a crucial business challenge—how to effectively target customers with customized pricing and offers. By conducting a Most Influential Customer Analysis, we can classify customers into distinct groups based on key drivers, enabling us to tailor our strategies to meet their specific needs and preferences.
+
+To accomplish this analysis, we will leverage a dataset containing valuable customer information, such as `review_count`, `yelping_since`, `useful`, `funny` and other relevant features. While the dataset in question is sourced from Yelp and comprises user reviews, the methodology can be applied to any customer data within our organization.
+
+The primary goal of this analysis is to identify the most influential factors that influence customer behavior and purchasing decisions. By understanding these drivers, we can gain insights into customer motivations and design targeted marketing campaigns and pricing structures.
+
+By segmenting our customer base into distinct groups, we can tailor our pricing and offers to match the preferences of each segment. This personalized approach fosters a sense of value and relevance, leading to increased customer satisfaction and loyalty.
+
+The benefits of conducting a Most Influential Customer Analysis are manifold. Firstly, we can allocate our marketing resources more efficiently by focusing on customer segments most likely to respond positively to our offerings. Secondly, by delivering personalized experiences, we create a stronger connection with our customers, further enhancing their satisfaction and loyalty.
+
+Furthermore, by continuously monitoring and updating our customer segmentation based on evolving influential factors, we can adapt our strategies in real-time. This agility allows us to stay ahead of the competition and remain responsive to changing customer demands.
+
+In conclusion, the Most Influential Customer Analysis will empower us to categorize our customers into distinct groups and design targeted pricing and offers. This approach will not only improve customer satisfaction but also drive conversion rates and overall business performance.
+
+In the following sections of this document, we will delve into the methodology, data analysis techniques, and actionable insights derived from the Most Influential Customer Analysis.
+
+Let's embark on this journey of understanding our customers and unlocking their potential to drive our business forward.
+
+# Read-in data and cleansing
+
+Firstly, we read in the datasat and perform initial data cleansing and preprocessing tasks. We check for missing values and then converts the `yelping_since` feature to a year format. Two new features, `elite_cnt` and `friends_cnt`, are created by counting the number of elite statuses and friends for each user. Unnecessary columns are removed from the dataset.
+
+Only sample size of 2000 customers is used. Also a random seed ensures reproducibility. This step allows for working with a manageable subset of data for subsequent analysis.
+
+> **Note:** Running this code might take approximately **10** minutes due to the data processing involved.
+
+```{r cleansing, eval=FALSE}
+# 1.0 READ-IN DATA ----
+# json_file <- here::here("data", "raw", "yelp_academic_dataset_user.json")
+user_raw <- jsonlite::stream_in(textConnection(readLines(json_file)),
+                                flatten = TRUE) %>%
+  as_tibble()
+
+# 2.0 CLEANSING ----
+# No missing values
+plot_missing(user_raw)
+
+# Tasks:
+# 1. convert date feature
+# 2. create two new features: counts of elite statuses and friends
+
+# << RUN >> this will take 10 mins to run
+user_full_tbl <- user_raw %>%
+  mutate(yelping_since = lubridate::year(ymd_hms(yelping_since)),
+         elite = strsplit(elite, ","),
+         elite_cnt = map_int(elite, ~ length(.x)),
+         friends = strsplit(friends, ","),
+         friends_cnt = map_int(friends, ~ length(.x))) %>%
+  select(-c(name, elite, friends))
+
+# save full cleansed dataset if needed
+# saveRDS(user_full_tbl, here::here("data", "processed", "user_cleansed.rds"))
+```
+
+```{r reading_in}
+# if for some reason your session crashes, re-create the dataset
+user_full_tbl <- readRDS(here::here("data", "processed", "user_cleansed.rds"))
+
+# Take only sample customers
+set.seed(1234)
+user_tbl <- user_full_tbl %>%
+  sample_n(size = 2000)
+
+```
+
+# Pre-processing
+
+Next step is the pre-processing stage of the analysis. We can utilize the `recipes` package in R for this purpose. By applying data transformation and scaling operations, we ensure that the data is appropriately prepared for analysis. This helps avoid "train/serve skew" by ensuring that any pre-processing steps applied to the training data are consistently applied to new data during the serving or prediction phase. Using the recipes package helps maintain consistency and improves the reliability of the analysis results.
+
+```{r recipes}
+# 3.0 PREPROCESSING -----
+rec_obj <- recipe(~ ., data = user_tbl) %>%
+  # Scale & Center for relationship analysis
+  step_center(all_numeric()) %>%
+  step_scale(all_numeric()) %>%
+  prep()
+
+train_tbl <- bake(rec_obj, new_data = user_tbl)
+
+# save sample preprocessed dataset if needed
+# saveRDS(train_tbl, here::here("data", "processed", "train_tbl.rds"))
+
+```
+
+# Customer similarity
+
+At this stage we are creating an adjacency matrix that measures the similarity between customers based on their preferences or behaviors. This matrix provides valuable insights into customer relationships, allowing businesses to identify patterns, clusters, and groups of customers with similar characteristics. This information is crucial for targeted marketing, personalized recommendations, and segmenting customers for customized pricing or offers. By leveraging the adjacency matrix, businesses can make data-driven decisions to optimize customer engagement and enhance overall business performance.
+
+```{r adj_matrix}
+# 4.0 ADJACENCY MATRIX ----
+# - User-Item Table
+customer_correlation_matrix <- train_tbl %>%
+  
+  # Transpose data for customer similarity
+  gather(key = "FEATURE", value = "value", -user_id, factor_key = TRUE) %>%
+  spread(key = user_id, value = value) %>%
+  select(-FEATURE) %>%
+  
+  # Adjacency Matrix - Perform Similarity using Correlation
+  as.matrix() %>%
+  cor() 
+
+# Feel free to inspect the user-item table
+# customer_correlation_matrix %>% 
+#   as_tibble(rownames = "user_id")
+
+# 5.0 PRUNING THE ADJACENCY MATRIX ----
+
+# Tasks:
+# 1. Remove customer relationships to themselves
+# 2. Remove duplicate relationships
+diag(customer_correlation_matrix) <- 0
+customer_correlation_matrix[upper.tri(customer_correlation_matrix)] <- 0
+
+# Prune relationships
+edge_limit <- 0.99
+customer_correlation_matrix[customer_correlation_matrix < edge_limit] <- 0
+
+# sum(customer_correlation_matrix > 0)
+
+# Filter relationships to subset of customers that have relationships
+customer_correlation_matrix <- customer_correlation_matrix[rowSums(customer_correlation_matrix) > 0, colSums(customer_correlation_matrix) > 0] 
+
+# number of customers with strong relationship
+# customer_correlation_matrix %>% dim()
+
+customer_correlation_matrix %>% 
+  as_tibble(rownames = "user_id") %>%
+  head() %>%
+  gt()
+
+# Convert to long tibble with From & To column relating customers
+customer_relationship_tbl <- customer_correlation_matrix %>%
+  as_tibble(rownames = "from") %>%
+  gather(key = "to", value = "weight", -from) %>%
+  filter(weight > 0)
+
+# inspect the object
+customer_relationship_tbl %>%
+  head() %>%
+  gt()
+```
+
+# Network analysis
+
+Once we have a customer relationships sorted we can turn them into graph representation. We can utilize the `tidygraph` package to manipulate a graph representation of customer relationships. In this graph, each customer is represented as a node, and the connections or similarities between customers are represented as edges. The code performs grouping and clustering of nodes based on their connectivity within the six distinct clusters. The color of the nodes corresponds to the assigned cluster, allowing for easy identification of different customer groups. The chart provides a visual representation of the customer network and helps understand the connections and clustering patterns among customers.
+
+This allows businesses to analyze customer networks, identify influential customers, and detect communities or clusters of customers with similar preferences or behaviors. By leveraging graph-based techniques, businesses gain insights into the relationships and structure of their customer base, enabling targeted marketing and strategic decision-making.
+
+> **Note:** Running this code might take approximately **10** minutes due to the data processing involved.
+
+```{r network_analysis, warning=FALSE}
+# 6.0 TBL GRAPH MANIPULATION ----
+
+customer_tbl_graph <- customer_correlation_matrix %>%
+  prep_corr_matrix_for_tbl_graph(edge_limit = 0.99) %>%
+  as_tbl_graph(directed = FALSE)
+
+# inspect the object
+# customer_tbl_graph
+
+# 6.1 Grouping Nodes (Clustering) ----
+grouped_tbl_graph <- customer_tbl_graph %>%
+  activate(nodes) %>%
+  mutate(neighbors = centrality_degree()) %>%
+  
+  mutate(group = group_components()) %>%
+  
+  arrange(desc(neighbors)) %>%
+  mutate(group_lump = group %>% as_factor() %>% fct_lump(n = 5))
+
+# Network of customers with relationships in 5 clusters
+# << RUN >> this will run 10 mins
+grouped_tbl_graph %>%
+  ggraph(layout = "kk") +
+  geom_edge_link(alpha = 0.5) +
+  geom_node_point(aes(color = group_lump), alpha = 0.5, size = 3) +
+  
+  theme_graph() +
+  scale_color_tq(theme = "light") +
+  theme(legend.position = "bottom") +
+  labs(title = "Customer Network Detection")
+
+```
+
+# Influencers
+
+Now we can identify the most influential customers within each cluster. These customers are considered valuable information for the sales and marketing departments. The resulting `influential_customers_tbl` provides a list of the influential customers, grouped by their respective clusters.
+
+The company can leverage these influential customers for monetization by creating special offers or promotions specifically targeted towards them. These influential customers have a higher likelihood of spreading the offer within their respective clusters, leading to increased engagement and potentially attracting more customers. This strategy capitalizes on the influence and network effects of these customers to maximize the impact of the company's marketing efforts and drive monetization.
+
+```{r influencers}
+# 7.0 MOST INFLUENTIAL CUSTOMERS ----
+# This is the most valuable information for sales/marketing departments
+influential_customers_tbl <- grouped_tbl_graph %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  group_by(group_lump) %>%
+  filter(neighbors %in% max(neighbors)) %>%
+  ungroup()
+
+# Based on these customers the company can draft special offer
+# and they (customers) will spread it among the cluster
+influential_customers_tbl %>%
+  gt()
+
+# Inspect the features of the most influential customers
+influential_customers_tbl %>%
+  left_join(user_tbl, by = c("name" = "user_id")) %>%
+  glimpse() %>%
+  gt()
+
+```
+
+# Communities
+
+In the previous step we identified clusters/communities. Now we can make use of these clusters for community analysis. Community analysis might not be as powerful as the most influencing customers (which is this case as well), but for completeness of customer segmentation exercise, let's proceed.
+
+Community analysis involves identifying distinct communities or clusters within the customer network. It helps uncover groups of customers with shared characteristics, preferences, or behaviors. This analysis is important as it allows businesses to better understand their customer base, tailor marketing strategies, and create personalized experiences for each community. By leveraging community analysis, businesses can enhance customer segmentation, develop targeted campaigns, and improve overall customer satisfaction and loyalty.
+
+```{r communities}
+# 8.0 COMMUNITY ANALYSIS ----
+# - join communities and inspect key features
+
+user_group_tbl <- user_tbl %>%
+  left_join(as_tibble(grouped_tbl_graph), by = c("user_id" = "name")) %>%
+  select(group_lump, user_id, everything()) %>%
+  filter(!is.na(group_lump))
+
+# inspect the object
+# user_group_tbl %>% glimpse()
+
+# 9.0 DISSIMILARITIES -----
+
+# Inspect the differences between individual groups by feature
+
+# << RUN >> these lines will take 1 min (each)
+user_group_tbl %>% plot_density_by(review_count, group_focus = 1)
+user_group_tbl %>% plot_density_by(log(review_count), group_focus = 1)
+
+user_group_tbl %>% plot_density_by(yelping_since, group_focus = 1)
+user_group_tbl %>% plot_density_by(log(funny), group_focus = 1)
+
+user_group_tbl %>% plot_density_by(average_stars, group_focus = 4)
+user_group_tbl %>% plot_density_by(average_stars, group_focus = 5)
+
+```
+
+# Machine Learning model
+
+In the next section, we are going to try and predict the group association of customers with help of the H2O.ai platform for machine learning. Predicting the group association makes sense in our scenario since it allows businesses to gain insights into customer segmentation by automatically categorizing customers into different groups based on their characteristics, preferences, or behaviors. 
+
+The `user_group_tbl` is converted to an H2O object. Independent features `x` are defined by excluding certain columns from the dataset. The target feature `y` represents the group association.
+
+The code then runs an high performant machine learning process to train multiple models using the defined features. The models are evaluated based on the mean per class error and are trained for a maximum runtime of 5 minutes.
+
+> **Note:** Running this code might take approximately **6** minutes due to the data processing involved.
+
+```{r h2o, message=FALSE}
+# 10.0 Machine Learning model to predict the group association ----
+
+h2o.init()
+
+user_group_h2o <- as.h2o(user_group_tbl)
+
+# Independent features
+x <- tibble(nm = names(user_group_h2o)) %>% 
+  filter(!nm %in% c("group_lump", "user_id", "neighbors", "group")) %>%
+  pull(nm)
+
+# Target feature
+y <- "group_lump"
+
+# Run model training
+# << RUN >> this will take 5 mins
+automl_models <- h2o.automl(
+  x = x, 
+  y = y,
+  training_frame = user_group_h2o,
+  stopping_metric = "mean_per_class_error",
+  max_runtime_secs = 300
+)
+
+# Select the best model
+# metric used for best model selection is mean per class error
+model_id <- automl_models@leaderboard %>% as_tibble() %>% 
+  filter(str_detect(model_id, "DRF")) %>% 
+  pull(model_id) %>% .[1]
+
+h2o_model <- h2o.getModel(model_id)
+
+Sys.time()
+```
+
+# Explainable Machine Learning
+
+Once we have our machine learning model trained and serving predictions, it is important that we understand how did the model made its decision. Another important aspects of explainability of machine learning:
+
+1. Explanations provide **transparency** and **interpretability**, helping us understand why the model made a particular prediction or classification. This understanding is crucial for building **trust** in the model and ensuring its fairness and accountability.
+
+1. Explanations allow us to identify the important features or factors that **influence** the model's decision-making. This insight helps in understanding the underlying patterns and relationships in the data, enabling us to make informed business decisions and take appropriate **actions**.
+
+1. Explanations aid in identifying potential **biases** or errors in the model. By analyzing the explanations, we can detect any inconsistencies or **unintended** consequences that may arise from the model's predictions, allowing for necessary adjustments or improvements.
+
+We can provide local explanations at the customer level using the LIME (Local Interpretable Model-agnostic Explanations) technique. It creates a local explainer to understand why a specific customer was classified into a particular group. We make predictions using the trained model and retrieves the top 4 most important features contributing to the model's classification decision. This analysis provides valuable insights into the factors influencing individual customer classifications, aiding in the understanding of the model's behavior and enhancing transparency in the decision-making process.
