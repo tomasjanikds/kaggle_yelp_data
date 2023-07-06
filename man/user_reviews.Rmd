@@ -23,7 +23,7 @@ library(tidygraph)
 library(ggraph)
 library(h2o)
 library(lime)
-library(gt)
+library(knitr)
 source(here::here("src", "R", "functions.R"))
 ```
 
@@ -83,7 +83,7 @@ user_full_tbl <- user_raw %>%
 # saveRDS(user_full_tbl, here::here("data", "processed", "user_cleansed.rds"))
 ```
 
-```{r reading_in}
+```{r reading_in, cache=TRUE}
 # if for some reason your session crashes, re-create the dataset
 user_full_tbl <- readRDS(here::here("data", "processed", "user_cleansed.rds"))
 
@@ -158,7 +158,7 @@ customer_correlation_matrix <- customer_correlation_matrix[rowSums(customer_corr
 customer_correlation_matrix %>% 
   as_tibble(rownames = "user_id") %>%
   head() %>%
-  gt()
+  kable()
 
 # Convert to long tibble with From & To column relating customers
 customer_relationship_tbl <- customer_correlation_matrix %>%
@@ -169,7 +169,7 @@ customer_relationship_tbl <- customer_correlation_matrix %>%
 # inspect the object
 customer_relationship_tbl %>%
   head() %>%
-  gt()
+  kable()
 ```
 
 # Network analysis
@@ -180,7 +180,7 @@ This allows businesses to analyze customer networks, identify influential custom
 
 > **Note:** Running this code might take approximately **10** minutes due to the data processing involved.
 
-```{r network_analysis, warning=FALSE}
+```{r network_analysis, warning=FALSE, cache=TRUE}
 # 6.0 TBL GRAPH MANIPULATION ----
 
 customer_tbl_graph <- customer_correlation_matrix %>%
@@ -233,13 +233,12 @@ influential_customers_tbl <- grouped_tbl_graph %>%
 # Based on these customers the company can draft special offer
 # and they (customers) will spread it among the cluster
 influential_customers_tbl %>%
-  gt()
+  kable()
 
 # Inspect the features of the most influential customers
-influential_customers_tbl %>%
-  left_join(user_tbl, by = c("name" = "user_id")) %>%
-  glimpse() %>%
-  gt()
+# influential_customers_tbl %>%
+#   left_join(user_tbl, by = c("name" = "user_id")) %>%
+#   glimpse()
 
 ```
 
@@ -287,11 +286,14 @@ The code then runs an high performant machine learning process to train multiple
 
 > **Note:** Running this code might take approximately **6** minutes due to the data processing involved.
 
-```{r h2o, message=FALSE}
-# 10.0 Machine Learning model to predict the group association ----
-
+```{r h2o_load, include=FALSE}
 h2o.init()
+h2o.no_progress()
+```
 
+
+```{r h2o, message=FALSE, warning=FALSE, cache=TRUE}
+# 10.0 Machine Learning model to predict the group association ----
 user_group_h2o <- as.h2o(user_group_tbl)
 
 # Independent features
@@ -319,8 +321,6 @@ model_id <- automl_models@leaderboard %>% as_tibble() %>%
   pull(model_id) %>% .[1]
 
 h2o_model <- h2o.getModel(model_id)
-
-Sys.time()
 ```
 
 # Explainable Machine Learning
@@ -334,3 +334,21 @@ Once we have our machine learning model trained and serving predictions, it is i
 1. Explanations aid in identifying potential **biases** or errors in the model. By analyzing the explanations, we can detect any inconsistencies or **unintended** consequences that may arise from the model's predictions, allowing for necessary adjustments or improvements.
 
 We can provide local explanations at the customer level using the LIME (Local Interpretable Model-agnostic Explanations) technique. It creates a local explainer to understand why a specific customer was classified into a particular group. We make predictions using the trained model and retrieves the top 4 most important features contributing to the model's classification decision. This analysis provides valuable insights into the factors influencing individual customer classifications, aiding in the understanding of the model's behavior and enhancing transparency in the decision-making process.
+
+```{r explanation}
+# 11.0 LOCAL (CUSTOMER LEVEL) EXPLANATION ----
+# create a local explainer 
+lime_result <- lime(user_group_tbl %>% select(-group_lump, -neighbors, -group, -user_id), 
+                    model = h2o_model)
+
+# make predicitons
+h2o.predict(h2o_model, newdata = as.h2o(user_group_tbl)) %>%
+  as_tibble()
+
+# Top 4 most important features contribution
+# Why did the model classify the customer into the group?
+explain_customer(6)
+explain_customer(8)
+
+```
+
