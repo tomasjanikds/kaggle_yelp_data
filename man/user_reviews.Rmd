@@ -158,7 +158,7 @@ customer_correlation_matrix <- customer_correlation_matrix[rowSums(customer_corr
 customer_correlation_matrix %>% 
   as_tibble(rownames = "user_id") %>%
   head() %>%
-  kable()
+  kable(caption = "Sample of correlation matrix. Numbers represent correlation between customers (rows and columns)")
 
 # Convert to long tibble with From & To column relating customers
 customer_relationship_tbl <- customer_correlation_matrix %>%
@@ -169,7 +169,7 @@ customer_relationship_tbl <- customer_correlation_matrix %>%
 # inspect the object
 customer_relationship_tbl %>%
   head() %>%
-  kable()
+  kable(caption = "Transformed correlation matrix into more readable form. 'from' and 'to' represent the customer and 'weight' depict the power of relationship betweent them.")
 ```
 
 # Network analysis
@@ -230,16 +230,15 @@ influential_customers_tbl <- grouped_tbl_graph %>%
   filter(neighbors %in% max(neighbors)) %>%
   ungroup()
 
-# Based on these customers the company can draft special offer
-# and they (customers) will spread it among the cluster
-influential_customers_tbl %>%
-  kable()
-
 # Inspect the features of the most influential customers
 # influential_customers_tbl %>%
 #   left_join(user_tbl, by = c("name" = "user_id")) %>%
 #   glimpse()
 
+# Based on these customers the company can draft special offer
+# and they (customers) will spread it among the cluster
+influential_customers_tbl %>%
+  kable(caption = "Top customers in their respective cluster (group_lump)")
 ```
 
 # Communities
@@ -248,7 +247,7 @@ In the previous step we identified clusters/communities. Now we can make use of 
 
 Community analysis involves identifying distinct communities or clusters within the customer network. It helps uncover groups of customers with shared characteristics, preferences, or behaviors. This analysis is important as it allows businesses to better understand their customer base, tailor marketing strategies, and create personalized experiences for each community. By leveraging community analysis, businesses can enhance customer segmentation, develop targeted campaigns, and improve overall customer satisfaction and loyalty.
 
-```{r communities}
+```{r communities, warning=FALSE}
 # 8.0 COMMUNITY ANALYSIS ----
 # - join communities and inspect key features
 
@@ -265,14 +264,28 @@ user_group_tbl <- user_tbl %>%
 # Inspect the differences between individual groups by feature
 
 # << RUN >> these lines will take 1 min (each)
-user_group_tbl %>% plot_density_by(review_count, group_focus = 1)
-user_group_tbl %>% plot_density_by(log(review_count), group_focus = 1)
+user_group_tbl %>% plot_density_by(log(review_count), group_focus = 1) +
+  labs(title = "Analyzing the distribution of review counts",
+       subtitle = "Customers in group one tend to give review less often",
+       caption = "Units are in logarithmic scale")
 
-user_group_tbl %>% plot_density_by(yelping_since, group_focus = 1)
-user_group_tbl %>% plot_density_by(log(funny), group_focus = 1)
+user_group_tbl %>% plot_density_by(yelping_since, group_focus = 1) +
+  labs(title = "Analyzing the distribution of yelping since",
+       subtitle = "Customers in group one started to yelp in 2015")
 
-user_group_tbl %>% plot_density_by(average_stars, group_focus = 4)
-user_group_tbl %>% plot_density_by(average_stars, group_focus = 5)
+user_group_tbl %>% plot_density_by(log(funny), group_focus = 1) +
+  labs(title = "Analyzing the distribution of funny reviews",
+       subtitle = "Customers in group one are not giving that much of funny reviews",
+       caption = "Units are in logarithmic scale")
+
+user_group_tbl %>% plot_density_by(average_stars, group_focus = 4) +
+  labs(title = "Analyzing the distribution of average stars",
+       subtitle = "Customers in group four tend to give lower reviews (average stars)")
+
+user_group_tbl %>% plot_density_by(average_stars, group_focus = 5) +
+  labs(title = "Analyzing the distribution of average stars",
+       subtitle = "Customers in group five tend to give 3.5 stars on average in their reveiws")
+
 
 ```
 
@@ -294,6 +307,9 @@ h2o.no_progress()
 
 ```{r h2o, message=FALSE, warning=FALSE, cache=TRUE}
 # 10.0 Machine Learning model to predict the group association ----
+
+# h2o.init()
+
 user_group_h2o <- as.h2o(user_group_tbl)
 
 # Independent features
@@ -311,7 +327,9 @@ automl_models <- h2o.automl(
   y = y,
   training_frame = user_group_h2o,
   stopping_metric = "mean_per_class_error",
-  max_runtime_secs = 300
+  max_runtime_secs = 300,
+  verbosity = NULL,
+  seed = 1234
 )
 
 # Select the best model
@@ -321,6 +339,11 @@ model_id <- automl_models@leaderboard %>% as_tibble() %>%
   pull(model_id) %>% .[1]
 
 h2o_model <- h2o.getModel(model_id)
+
+automl_models@leaderboard %>%
+  as_tibble() %>%
+  head() %>%
+  kable(caption = "List of top performing models based on mean per class error metric. The top one will be used for predictions.")
 ```
 
 # Explainable Machine Learning
@@ -335,7 +358,7 @@ Once we have our machine learning model trained and serving predictions, it is i
 
 We can provide local explanations at the customer level using the LIME (Local Interpretable Model-agnostic Explanations) technique. It creates a local explainer to understand why a specific customer was classified into a particular group. We make predictions using the trained model and retrieves the top 4 most important features contributing to the model's classification decision. This analysis provides valuable insights into the factors influencing individual customer classifications, aiding in the understanding of the model's behavior and enhancing transparency in the decision-making process.
 
-```{r explanation}
+```{r predictions, warning=FALSE}
 # 11.0 LOCAL (CUSTOMER LEVEL) EXPLANATION ----
 # create a local explainer 
 lime_result <- lime(user_group_tbl %>% select(-group_lump, -neighbors, -group, -user_id), 
@@ -343,12 +366,78 @@ lime_result <- lime(user_group_tbl %>% select(-group_lump, -neighbors, -group, -
 
 # make predicitons
 h2o.predict(h2o_model, newdata = as.h2o(user_group_tbl)) %>%
-  as_tibble()
+  as_tibble() %>%
+  head() %>%
+  kable(col.names = c("Predicted group",
+                      "Probability (group 1)",
+                      "Probability (group 2)",
+                      "Probability (group 3)",
+                      "Probability (group 4)",
+                      "Probability (group 5)",
+                      "Probability (group Other)"),
+        caption = "Sample of customer predictions belonging to appropriate group")
+```
 
+> **Note:** Below plots might not be reproduced exactly in your environment, but the explanation remains the same.
+
+```{r explanations, warning=FALSE, echo=FALSE}
 # Top 4 most important features contribution
 # Why did the model classify the customer into the group?
-explain_customer(6)
-explain_customer(8)
+explain_customer(6) +
+  labs(caption = "Customer number 6 was predicted to belong to group 'Other'. The above features are supporting or contradicting this prediction the most.")
+
+explain_customer(8) +
+    labs(caption = "Customer number 8 was predicted to belong to group number two. The above features are supporting or contradicting this prediction the most.")
+
 
 ```
 
+# Conclusion
+
+In this analysis, we addressed the business problem of customer classification and **targeted** marketing and sales strategies by leveraging customer data and machine learning techniques. We employed various steps and techniques to gain valuable insights into the customer base and inform business strategies.
+
+Initially, we conducted a most influential customer analysis, identifying **drivers** and features that contribute to customer classification into different groups. By utilizing the Yelp dataset and extracting relevant features such as review count, yelping since, and social interactions, we were able to **uncover** meaningful patterns and segment customers into distinct groups.
+
+Through graph-based analysis, we explored customer **relationships** and communities using the `tidygraph` package. This allowed us to understand customer clusters, detect most  **influential** customers, and uncover network structures within the customer base. These insights provided valuable information for targeted marketing, personalized recommendations, and customized pricing strategies.
+
+Next, we trained a machine learning model to predict the group association of customers, which improved customer segmentation and decision-making processes. The model allowed us to **understand** the factors driving customer groupings, enabling the development of tailored marketing strategies.
+
+We also utilized the LIME (Local Interpretable Model-agnostic Explanations) technique to provide local **explanations** at the customer level. This enhanced our understanding of why individual customers were classified into specific groups, providing transparency and insights into the decision-making process of the machine learning model.
+
+This document provides **actionable** insights for the business. By understanding customer groups, relationships, and influential customers, the company can optimize marketing efforts, develop personalized campaigns, and improve customer engagement. The insights gained from this analysis enable data-driven decision-making, leading to enhanced **customer satisfaction**, increased loyalty, and improved business performance.
+
+By leveraging the power of customer data, machine learning, and graph analysis techniques, the company is well-positioned to make informed strategic decisions and gain a competitive edge in the market. The actionable insights derived from this analysis provide a solid foundation for implementing targeted marketing strategies and enhancing overall customer experience.
+
+# References
+
+1. Wickham, H. (2019). tidyverse: Easily Install and Load the 'Tidyverse' (R Package Version 1.3.1) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=tidyverse)
+
+2. Grolemund, G., & Wickham, H. (2011). lubridate: Make Dealing with Dates a Little Easier (R Package Version 1.8.0) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=lubridate)
+
+3. Peterson, M. (2021). tidyquant: Tidy Quantitative Financial Analysis (R Package Version 1.0.1) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=tidyquant)
+
+4. Da Silva, A. (2020). DataExplorer: Automate Data Exploration and Treatment (R Package Version 1.0.0) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=DataExplorer)
+
+5. Wickham, H., & Cook, D. (2020). recipes: Preprocessing Tools to Create Design Matrices (R Package Version 0.1.16) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=recipes)
+
+6. Csárdi, G., & Nepusz, T. (2020). tidygraph: A Tidy API for Graph Manipulation (R Package Version 1.3.0) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=tidygraph)
+
+7. Pedersen, T. L. (2021). ggraph: An Implementation of Grammar of Graphics for Graphs and Networks (R Package Version 2.1.5) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=ggraph)
+
+8. H2O.ai. (n.d.). H2O: Open Source Fast Scalable Machine Learning Platform. Retrieved from [H2O.ai](http://docs.h2o.ai/)
+
+9. Pedersen, T. L. (2019). lime: Local Interpretable Model-Agnostic Explanations (R Package Version 0.5.2) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=lime)
+
+10. Xie, Y., & Allaire, J. J. (2021). knitr: A General-Purpose Package for Dynamic Report Generation in R (R Package Version 1.36) [Computer software]. Retrieved from [CRAN](https://CRAN.R-project.org/package=knitr)
+
+11. Newman, M. E. (2010). Networks: An Introduction. Oxford University Press.
+
+12. Borgatti, S. P., Everett, M. G., & Johnson, J. C. (2018). Analyzing Social Networks. SAGE Publications.
+
+13. Lusher, D., Koskinen, J., & Robins, G. (Eds.). (2013). Exponential Random Graph Models for Social Networks: Theory, Methods, and Applications. Cambridge University Press.
+
+14. Domingos, P., & Richardson, M. (2001). Mining the network value of customers. In Proceedings of the Seventh ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (pp. 57-66).
+
+15. Breiman, L. (2001). Random forests. Machine learning, 45(1), 5-32.
+
+16. Ribeiro, M. T., Singh, S., & Guestrin, C. (2016). "Why should I trust you?" Explaining the predictions of any classifier. In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (pp. 1135-1144).

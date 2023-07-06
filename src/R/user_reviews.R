@@ -178,14 +178,27 @@ user_group_tbl %>% glimpse()
 # Inspect the differences between individual groups by feature
 
 # << RUN >> these lines will take 1 min (each)
-user_group_tbl %>% plot_density_by(review_count, group_focus = 1)
-user_group_tbl %>% plot_density_by(log(review_count), group_focus = 1)
+user_group_tbl %>% plot_density_by(log(review_count), group_focus = 1) +
+  labs(title = "Analyzing the distribution of review counts",
+       subtitle = "Customers in group one tend to give review less often",
+       caption = "Units are in logarithmic scale")
 
-user_group_tbl %>% plot_density_by(yelping_since, group_focus = 1)
-user_group_tbl %>% plot_density_by(log(funny), group_focus = 1)
+user_group_tbl %>% plot_density_by(yelping_since, group_focus = 1) +
+  labs(title = "Analyzing the distribution of yelping since",
+       subtitle = "Customers in group one started to yelp in 2015")
 
-user_group_tbl %>% plot_density_by(average_stars, group_focus = 4)
-user_group_tbl %>% plot_density_by(average_stars, group_focus = 5)
+user_group_tbl %>% plot_density_by(log(funny), group_focus = 1) +
+  labs(title = "Analyzing the distribution of funny reviews",
+       subtitle = "Customers in group one are not giving that much of funny reviews",
+       caption = "Units are in logarithmic scale")
+
+user_group_tbl %>% plot_density_by(average_stars, group_focus = 4) +
+  labs(title = "Analyzing the distribution of average stars",
+       subtitle = "Customers in group four tend to give lower reviews (average stars)")
+
+user_group_tbl %>% plot_density_by(average_stars, group_focus = 5) +
+  labs(title = "Analyzing the distribution of average stars",
+       subtitle = "Customers in group five tend to give 3.5 stars on average in their reveiws")
 
 # 10.0 Machine Learning model to predict the group association ----
 
