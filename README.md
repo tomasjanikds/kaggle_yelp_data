@@ -2,6 +2,8 @@
 
 This repository contains the necessary files and code for a most influential customers machine learning solution. The directory structure is organized as follows:
 
+- `man`: This directory contains HTML report `user_reviews.html` with the solution along with a file generating this report `user_reviews.Rmd` should you wish to replicate it.
+
 - `data/processed`: This directory contains all the data used for training, serving the machine learning model and final scoring dataset.
 
 - `data/raw`: This directory contains the raw data files.
@@ -9,8 +11,6 @@ This repository contains the necessary files and code for a most influential cus
 - `kaggle_yelp_data.Rproj`: This is the R project file associated with this repo.
 
 - `renv.lock`: This file specifies the package dependencies and their versions for reproducibility using the R package `renv`.
-
-- `man`: This directory contains HTML reports along with a file generating this report.
 
 - `src/R`: This directory contains the R scripts for the machine learning solution. The scripts are organized into the following workflow:
 
