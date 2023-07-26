@@ -68,7 +68,8 @@ plot_density_by <- function(data, col, group_focus = 1, ncol = 1) {
     mutate(focus = as.character(group_lump)) %>%
     select(focus, everything()) %>%
     mutate(focus = ifelse(as.character(focus) == as.character(group_focus), 
-                          "1", "Other")) %>%
+                          as.character(group_focus), 
+                          "Other")) %>%
     mutate(focus = as.factor(focus)) %>%
     
     ggplot(aes(!! col_expr, fill = focus)) +

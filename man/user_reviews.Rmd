@@ -305,7 +305,7 @@ h2o.no_progress()
 ```
 
 
-```{r h2o, message=FALSE, warning=FALSE, cache=TRUE}
+```{r h2o, message=FALSE, warning=FALSE, cache=FALSE}
 # 10.0 Machine Learning model to predict the group association ----
 
 # h2o.init()
